@@ -1,0 +1,8 @@
+D:\TireOCR\Train_Pic\image\picture_1.PNG	1
+D:\TireOCR\Train_Pic\picture_1.PNG	1
+D:\TireOCR\Train_Pic\picture_3.PNG	1
+D:\TireOCR\Train_Pic\picture_5.PNG	1
+D:\TireOCR\Train_Pic\picture_7.PNG	1
+D:\TireOCR\Train_Pic\picture_9.PNG	1
+D:\TireOCR\Train_Pic\picture_11.PNG	1
+D:\TireOCR\Train_Pic\picture_13.PNG	1
