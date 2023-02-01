@@ -1,5 +1,7 @@
 [TOC]
 
+------
+
 
 
 # 结果预览
@@ -13,6 +15,8 @@ CPU: Intel Core i7-12700KF
 GPU: NVIDIA RTX 3080TI
 
 RAM: 32GB
+
+------
 
 
 
@@ -40,6 +44,8 @@ OCR主要分为两部分:
 在OCR技术中，有几种最常见的问题：透视变换、尺寸过小、文字扭曲、背景复杂、字体多样、语言混合、字体模糊、光照复杂。这些问题，在本次的轮胎OCR识别中都有着或多的体现。
 
 
+
+------
 
 
 
@@ -204,6 +210,8 @@ OCR主要分为两部分:
 
 ![image-20230130233949493](/asset/image-20230130233949493.png)
 
+------
+
 
 
 # 三、文本检测
@@ -293,6 +301,8 @@ EAST 模型的网络结构分为特征提取层、特征融合层、输出层三
 Differentiable Binarization（DB），可以在分割网络中执行二值化的过程，可以自适应的设置二值化阈值，不仅可以简化后处理，并且提高了文本检测的性能。
 
 在本项目所使用的框架PP中，集成了DB。也一并使用了这一算法来识别作为对照。
+
+------
 
 
 
@@ -404,19 +414,13 @@ SVTR的网络如下图所示。
 
 ![img](https://pic3.zhimg.com/v2-1fead088853f2392cbb9f3f641e2e14a_r.jpg)
 
-参考的swin transformer网络结构如下：
 
-![img](https://pic2.zhimg.com/v2-dab52be2dd740283db7d3f25a55510a9_r.jpg)
-
-SVTR是一个三级逐步下采样的网络（和swin transformer一样，下采样三次），和CNN架构一样，由block + 下采样模块组成。
-
-其block模块和普通的swin中的block模块一致，都是self-attention + mlp。不同的是，SVTR中self-attention的方式和swin的滑动窗口有一定的差异。
 
 ### 4.3.1 Patch Embedding
 
 SVTR使用两个卷积进行1/4下采样得到token。不同的是，swin是直接使用一个步长为4的4×4卷积进行无重叠的patch embedding。
 
-但是，svtr则是使用两个步长为2的3×3卷积进行有重叠的patch embedding（延续的CNN的作风，感受野更大，提取局部信息的表达能力也会比swin的patch embedding要好）。
+但是，SVTR则是使用两个步长为2的3×3卷积进行有重叠的patch embedding（延续的CNN的作风，感受野更大，提取局部信息的表达能力也会比swin的patch embedding要好）。
 
 
 
@@ -441,6 +445,8 @@ SVTR使用SubSample模块是一个步长为（2，1）核大小为3×3的普通�
 更具体地说，对于embedded组件，作者认为文本识别需要两种特征。（1）第一个是局部组件模式，如类似笔画的特征。它编码了形态特征和特征不同部分之间的相关性；（2）第二种是字符间的依赖性，如不同字符之间或文本和非文本组件之间的相关性。
 
 因此，作者设计了两个混合块（全局Mix和局部Mix），通过使用不同接收场的self-attention来感知上下文的相关性。
+
+
 
 #### 	4.3.3.1 Global Mixing
 
@@ -502,15 +508,15 @@ SVTR_LCNet是针对文本识别任务，将基于Transformer的[SVTR](https://ar
 
 SVTR_Tiny 网络结构如下所示：![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/svtr_tiny.png)
 
-由于 MKLDNN 加速库支持的模型结构有限，SVTR 在 CPU+MKLDNN 上相比 PP-OCRv2  慢了10倍。PP-OCRv3 期望在提升模型精度的同时，不带来额外的推理耗时。
-
-通过分析发现，SVTR_Tiny 结构的主要耗时模块为  Mixing Block，因此我们对 SVTR_Tiny 的结构进行了一系列优化。
+由于 MKLDNN 加速库支持的模型结构有限，SVTR 在 CPU+MKLDNN 上相比 PP-OCRv2  慢了10倍。PP-OCRv3 期望在提升模型精度的同时，不带来额外的推理耗时。SVTR_Tiny 结构的主要耗时模块为  Mixing Block，因此PPOCR团队对 SVTR_Tiny 的结构进行了一系列优化。
 
 1、将 SVTR 网络前半部分替换为 PP-LCNet 的前三个stage，保留4个 Global Mixing Block ，精度为76%，加速69%，网络结构如下所示：[![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/svtr_g4.png)](https://github.com/PaddlePaddle/PaddleOCR/blob/release/2.6/doc/ppocr_v3/svtr_g4.png)
 
 2、将4个 Global Mixing Block 减小到2个，精度为72.9%，加速69%，网络结构如下所示：![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/svtr_g2.png)
 
-3、实验发现 Global Mixing Block 的预测速度与输入其特征的shape有关，因此后移 Global Mixing Block 的位置到池化层之后，精度下降为71.9%，速度超越基于CNN结构的PP-OCRv2-baseline 22%，网络结构如下所示：[![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/LCNet_SVTR.png)](https://github.com/PaddlePaddle/PaddleOCR/blob/release/2.6/doc/ppocr_v3/LCNet_SVTR.png)
+3、Global Mixing Block 的预测速度与输入其特征的shape有关，因此后移 Global Mixing Block 的位置到池化层之后，精度下降为71.9%，速度超越基于CNN结构的PP-OCRv2-baseline 22%，网络结构如下所示：[![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/LCNet_SVTR.png)](https://github.com/PaddlePaddle/PaddleOCR/blob/release/2.6/doc/ppocr_v3/LCNet_SVTR.png)
+
+------
 
 
 
@@ -569,6 +575,8 @@ epoch_num: 5000
 ![image-20230131002406619](/asset/image-20230131002406619.png)
 
 在测试中发现，对于 7与/，O与0，1与I的区分存在困难。即使是更换了自己训练的模型之后仍然存在这个问题。
+
+------
 
 
 
