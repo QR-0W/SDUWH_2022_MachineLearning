@@ -316,6 +316,14 @@ Differentiable Binarization（DB），可以在分割网络中执行二值化的
 
 CRNN（Convolutional Recurrent Neural Network，卷积循环神经网络），是华中科技大学在发表的论文《An  End-to-End Trainable Neural Network for Image-based Sequence Recognition and ItsApplication to Scene Text  Recognition》提出的一个识别文本的方法，该模型主要用于解决基于图像的序列识别问题，特别是场景文字识别问题。
 
+CRNN 的主要特点是：
+
+（1）可以进行端到端的训练；
+
+（2）不需要对样本数据进行字符分割，可识别任意长度的文本序列
+
+（3）模型速度快、性能好，并且模型很小（参数少）
+
 
 
 ### 4.1.1 CRNN基本结构
@@ -329,6 +337,8 @@ CRNN 模型主要由以下三部分组成：
 （2）循环层：预测从卷积层获取的特征序列的标签分布；
 
 （3）转录层：把从循环层获取的标签分布通过去重、整合等操作转换成最终的识别结果。
+
+下面将展开对这三个层进行介绍：
 
 
 
@@ -384,13 +394,123 @@ CRNN 对输入图像先做了缩放处理，把所有输入图像缩放到相同
 
 
 
-## 4.3 SVTR_LCNet
+## 4.3 SVTR
 
-SVTR_LCNet 是一种新设计的轻量级文本识别网络，它结合了基于Transformer的算法 SVTR (Du 等人 2022)  和基于卷积的算法 PP-LCNet (Cui 等人 2021)，被用作PP-OCRv2 识别器的骨干，以结合它们在准确性和速度方面的优势。
+CRNN这种架构虽然准确，但复杂且LSTM的效率较低，很多移动设备对LSTM的加速效果并不好，所以在实际的应用场景中也存在诸多限制。随着swin transformer在计算机视觉领域大放光彩，swin的这种金字塔结构（像CNN里面的下采样一样）也被引入到文字识别。
 
-SVTR_Tiny 网络结构如下所示：![svtr_tiny](/asset/svtr_tiny.png)
+而SVTR是一种文本定制的识别模型。它引入局部和全局混合块，分别提取笔划特征和字符间相关性，并结合多尺度backbone，形成多粒度特征描述。SVTR-L在识别英汉场景文本方面都取得了先进的性能。在一个NVIDIA1080TiGPU中，参数为6.03M，每幅图像文本平均消耗4.5ms。
 
-在本项目所使用的框架PP中，集成了SVTR_LCNet。也一并使用了这一算法来识别作为对照。
+SVTR的网络如下图所示。
+
+![img](https://pic3.zhimg.com/v2-1fead088853f2392cbb9f3f641e2e14a_r.jpg)
+
+参考的swin transformer网络结构如下：
+
+![img](https://pic2.zhimg.com/v2-dab52be2dd740283db7d3f25a55510a9_r.jpg)
+
+SVTR是一个三级逐步下采样的网络（和swin transformer一样，下采样三次），和CNN架构一样，由block + 下采样模块组成。
+
+其block模块和普通的swin中的block模块一致，都是self-attention + mlp。不同的是，SVTR中self-attention的方式和swin的滑动窗口有一定的差异。
+
+### 4.3.1 Patch Embedding
+
+SVTR使用两个卷积进行1/4下采样得到token。不同的是，swin是直接使用一个步长为4的4×4卷积进行无重叠的patch embedding。
+
+但是，svtr则是使用两个步长为2的3×3卷积进行有重叠的patch embedding（延续的CNN的作风，感受野更大，提取局部信息的表达能力也会比swin的patch embedding要好）。
+
+
+
+### 4.3.2 下采样模块
+
+SVTR延续了paddleocr里面的CRNN下采样结构，3个下采样模块都只对特征图的高度进行下采样，即：
+
+![img](https://pic4.zhimg.com/v2-4317ec36a27608ed39caf069244ca92b_r.jpg)
+
+SVTR使用SubSample模块是一个步长为（2，1）核大小为3×3的普通卷积，之所以对高度进行下采样而不对宽度进行下采样，有两个原因：
+
+（1）宽维度所包含的文字信息笔记丰富，下采样会造成较多信息的丢失
+
+（2）CTC解码前的Argmax序列输出长度越大，结果越稀疏（包含的空字符越多，CTC解码时**连续相同的文字**就很大程度上不会被误判掉）
+
+
+
+### 4.3.3 MixBlock结果
+
+由于两个字符可能略有不同，文本识别严重依赖于字符组件级别的特征。然而，现有的研究大多采用**特征序列**来表示图像文本。**每个特征对应于一个切片图像区域**，这通常是有噪声的，特别是对于不规则的文本。它不是描述这个角色的最佳方法。而vision transformer引入了二维特征表示，但如何在文本识别的背景下利用这种表示仍然值得研究。
+
+更具体地说，对于embedded组件，作者认为文本识别需要两种特征。（1）第一个是局部组件模式，如类似笔画的特征。它编码了形态特征和特征不同部分之间的相关性；（2）第二种是字符间的依赖性，如不同字符之间或文本和非文本组件之间的相关性。
+
+因此，作者设计了两个混合块（全局Mix和局部Mix），通过使用不同接收场的self-attention来感知上下文的相关性。
+
+#### 	4.3.3.1 Global Mixing
+
+Global  Mixing评估所有字符组件之间的依赖性。由于文本和非文本是图像中的两个主要元素，这种通用的Mixing可以建立来自不同字符的组件之间的长期依赖关系。此外，它还能削弱非文本成分的影响，同时提高文本成分的重要性。在数学上，对于上一阶段的字符组件CCi−1，它首先被reshape为一个特征序列。当进入Mixing block时，应用layer  norm进行标准化，然后进行多头自注意获取其依赖关系。然后，依次应用LN和MLP进行特征融合。与同时引入跳跃连接，形成全局混合块。如下图所示：
+
+![img](https://pic4.zhimg.com/v2-659a583d921d4f15502a6f4f57d8213b_r.jpg)
+
+Global Mixing本质上就是一个简单的自注意力机制，特征图经过线性变换投影到三个空间，然后q矩阵和k矩阵的转置进行矩阵乘法、softmax操作得到attention矩阵，最后和v矩阵进行矩阵乘法得到输出，paddle代码如下所示：
+
+
+
+#### 	4.3.3.2 Local Mixing
+
+![img](https://pic4.zhimg.com/v2-b664a2745c04597c689d801e1f4c2d37_r.jpg)
+
+如图4(b)所示，Local mixing评估了预定义窗口内组件之间的相关性。其目的是对形态特征进行编码，并建立特征内成分之间的关联，从而模拟对特征识别至关重要的**笔画样例特征**。
+
+与Global Mixing不同，Local mixing考虑的是每个分量都有一个邻域。**与卷积类似**，混合是以滑动窗口的方式进行。窗口大小根据经验设置为7×11。
+
+与Global Mixing相比，它实现了自我注意机制来捕获局部模式。其实就是Swin  transformer里面的那一套，将全局的self-attention转换为局部的self-attention来计算，只不过swin是为了减少计算量，而SVTR是为了获取更多的局部信息。
+
+而且swin是通过reshape这种类似的方式来进行滑窗，并将不同的窗口累加到通道维度上，而SVTR则是直接使用值为0的mask操作。SVTR这种做法和swin相比，计算复杂度还是比较高。
+
+
+
+### 4.3.4 Merging
+
+其实就是下采样操作，和卷积的下采样一样。因为self-attention的计算量和特征图的宽高有关，宽高太大的话，计算复杂度暴涨，所以SVTR对其进行了下采样操作，在低分辨率的特征图上计算可以减少矩阵乘法的计算复杂度。
+
+
+
+### 4.3.5 Combining and Prediction
+
+在最后一个阶段，使用一个Combining进行维度的压缩。
+
+首先将高度维度全局池化为1，然后是经过全连接层处理。在这里字符被进一步压缩为一个特征序列。与CRNN中的合并操作相比，SVTR的合并操作可以避免对一维尺寸非常小的token进行卷积，例如对高度为2的token进行卷积。
+
+接着利用组合特征，通过一个简单的并行线性预测来实现识别。具体地说，使用全连接层生成转录序列。理想情况下，相同字符被转录成重复的字符，非文本的组件被转录成一个空白符号。就是一个CTC解码模块。
+
+
+
+## 4.4 Paddle + SVTR
+
+在本次项目里使用的PaddlePaddle框架还提供了基于SVTR算法优化的SVTR。这一算法不再采用RNN，而是使用transformer结构。这样可以更加有效地挖掘文本行图像的上下文信息，从而提升文本识别能力。
+
+PP-OCRv3的识别模块是基于文本识别算法[SVTR](https://arxiv.org/abs/2205.00159)优化。SVTR不再采用RNN结构，通过引入Transformers结构更加有效地挖掘文本行图像的上下文信息，从而提升文本识别能力。
+
+直接将识别模型替换成SVTR_Tiny，识别准确率从74.8%提升到80.1%，但是预测速度慢了将近11倍。
+
+ 总的来看，整个结构其实就是通过self-attention和线性层完成视觉信息和序列信息的编码一步到位。也就是省掉了CRNN里面那个LSTM模块。但是，在PaddleOCR  V3里面只使用了两层的self-attention，还是通过mobilenet提取视觉信息，self-attention进行序列信息转换，没有全部使用transformer模块，大概是为了减少计算复杂度。
+
+
+
+## 4.5 融合：SVTR_LCNet
+
+SVTR_LCNet是针对文本识别任务，将基于Transformer的[SVTR](https://arxiv.org/abs/2205.00159)网络和轻量级CNN网络[PP-LCNet](https://arxiv.org/abs/2109.15099)融合的一种轻量级文本识别网络。
+
+使用该网络，预测速度优于PP-OCRv2的识别模型20%，但是由于没有采用蒸馏策略，该识别模型效果略差。此外，进一步将输入图片规范化高度从32提升到48，预测速度稍微变慢，但是模型效果大幅提升，识别准确率达到73.98%（+2.08%），接近PP-OCRv2采用蒸馏策略的识别模型效果。
+
+SVTR_Tiny 网络结构如下所示：![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/svtr_tiny.png)
+
+由于 MKLDNN 加速库支持的模型结构有限，SVTR 在 CPU+MKLDNN 上相比 PP-OCRv2  慢了10倍。PP-OCRv3 期望在提升模型精度的同时，不带来额外的推理耗时。
+
+通过分析发现，SVTR_Tiny 结构的主要耗时模块为  Mixing Block，因此我们对 SVTR_Tiny 的结构进行了一系列优化。
+
+1、将 SVTR 网络前半部分替换为 PP-LCNet 的前三个stage，保留4个 Global Mixing Block ，精度为76%，加速69%，网络结构如下所示：[![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/svtr_g4.png)](https://github.com/PaddlePaddle/PaddleOCR/blob/release/2.6/doc/ppocr_v3/svtr_g4.png)
+
+2、将4个 Global Mixing Block 减小到2个，精度为72.9%，加速69%，网络结构如下所示：![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/svtr_g2.png)
+
+3、实验发现 Global Mixing Block 的预测速度与输入其特征的shape有关，因此后移 Global Mixing Block 的位置到池化层之后，精度下降为71.9%，速度超越基于CNN结构的PP-OCRv2-baseline 22%，网络结构如下所示：[![img](https://github.com/PaddlePaddle/PaddleOCR/raw/release/2.6/doc/ppocr_v3/LCNet_SVTR.png)](https://github.com/PaddlePaddle/PaddleOCR/blob/release/2.6/doc/ppocr_v3/LCNet_SVTR.png)
 
 
 
