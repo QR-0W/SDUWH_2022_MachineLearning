@@ -23,6 +23,9 @@ RAM: 32GB
 
 ------
 
+布匹缺陷检测：https://github.com/Xande1r/Fabric-Defection-Detection
+
+------
 
 
 # 一、OCR简述
